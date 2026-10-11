@@ -1,0 +1,16 @@
+FROM node:20-alpine AS build
+WORKDIR /app
+ENV NEXT_TELEMETRY_DISABLED=1
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY tsconfig.base.json ./
+COPY apps/web ./apps/web
+COPY packages/types ./packages/types
+RUN npm run build --workspace apps-web
+
+FROM node:20-alpine
+WORKDIR /app
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
+COPY --from=build /app ./
+EXPOSE 3000
+CMD ["npm", "start", "--workspace", "apps-web"]

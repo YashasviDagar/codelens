@@ -1,0 +1,15 @@
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY tsconfig.base.json tsconfig.json ./
+COPY packages ./packages
+COPY prisma ./prisma
+COPY workers ./workers
+RUN npx prisma generate
+
+FROM node:20-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /app ./
+CMD ["npx", "tsx", "workers/review-worker/src/index.ts"]

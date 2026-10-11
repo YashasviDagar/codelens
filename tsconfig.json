@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@codelens/types": ["packages/types/src/index.ts"],
+      "@codelens/analyzer": ["packages/analyzer/src/index.ts"],
+      "@codelens/rules": ["packages/rules/src/index.ts"],
+      "@codelens/ai": ["packages/ai/src/index.ts"],
+      "@codelens/github": ["packages/github/src/index.ts"],
+      "@codelens/config": ["packages/config/src/index.ts"]
+    }
+  },
+  "include": ["packages/*/src/**/*.ts", "apps/api/src/**/*.ts", "workers/review-worker/src/**/*.ts", "tests/**/*.ts"]
+}

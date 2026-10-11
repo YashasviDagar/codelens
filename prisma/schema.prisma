@@ -1,0 +1,287 @@
+// CodeLens database schema
+// PostgreSQL + Prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Users & auth
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String   @id @default(cuid())
+  githubId      BigInt   @unique
+  login         String
+  name          String?
+  email         String?
+  avatarUrl     String?
+  // GitHub OAuth token encrypted at rest (AES-256-GCM, ENCRYPTION_KEY)
+  githubToken   String
+  role          Role     @default(USER)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  installations  RepositoryMember[]
+  feedback       FindingFeedback[]
+  comments       ReviewComment[]
+  sessions       Session[]
+
+  @@index([login])
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Repositories & PRs
+// ---------------------------------------------------------------------------
+
+model Repository {
+  id                String   @id @default(cuid())
+  githubId          BigInt   @unique
+  owner             String
+  name              String
+  fullName          String   @unique
+  defaultBranch     String   @default("main")
+  isPrivate         Boolean  @default(false)
+  language          String?
+  webhookEnabled    Boolean  @default(false)
+  // Per-repo review configuration (JSON matching ReviewConfig schema)
+  config            Json     @default("{}")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  pullRequests      PullRequest[]
+  members           RepositoryMember[]
+
+  @@index([owner, name])
+}
+
+// Which users have connected a repository (many-to-many, least privilege)
+model RepositoryMember {
+  id            String   @id @default(cuid())
+  repositoryId  String
+  userId        String
+  permission    RepoPermission @default(WRITE)
+  createdAt     DateTime @default(now())
+
+  repository    Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  user          User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([repositoryId, userId])
+  @@index([userId])
+}
+
+enum RepoPermission {
+  READ
+  WRITE
+  ADMIN
+}
+
+model PullRequest {
+  id             String   @id @default(cuid())
+  repositoryId   String
+  githubPrNumber Int
+  title          String
+  authorLogin    String
+  branchName     String?
+  baseSha        String?
+  headSha        String?
+  status         PRStatus @default(OPEN)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  closedAt       DateTime?
+
+  repository     Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  reviews        Review[]
+
+  @@unique([repositoryId, githubPrNumber])
+  @@index([repositoryId, status])
+}
+
+enum PRStatus {
+  OPEN
+  MERGED
+  CLOSED
+}
+
+// ---------------------------------------------------------------------------
+// Reviews & findings
+// ---------------------------------------------------------------------------
+
+model Review {
+  id             String       @id @default(cuid())
+  pullRequestId  String
+  commitSha      String
+  status         ReviewStatus @default(QUEUED)
+  filesAnalyzed  Int          @default(0)
+  linesChanged   Int          @default(0)
+  summary        String?
+  // { "critical": 0, "high": 1, ... }
+  severityCounts Json?
+  qualityScore   Int?
+  durationMs     Int?
+  tokensUsed     Int          @default(0)
+  error          String?
+  startedAt      DateTime     @default(now())
+  completedAt    DateTime?
+
+  pullRequest    PullRequest  @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
+  findings       Finding[]
+  comments       ReviewComment[]
+
+  // Cache key: same commit + same config hash = reusable analysis
+  configHash     String?
+
+  @@unique([pullRequestId, commitSha])
+  @@index([status])
+  @@index([commitSha])
+}
+
+enum ReviewStatus {
+  QUEUED
+  ANALYZING
+  STATIC_ANALYSIS
+  AI_REVIEW
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model Finding {
+  id             String       @id @default(cuid())
+  reviewId       String
+  externalId     String       @unique @default(cuid())
+  file           String
+  line           Int?
+  endLine        Int?
+  category       Category
+  severity       Severity
+  title          String
+  description    String
+  evidence       String?
+  recommendation String?
+  suggestedPatch String?
+  confidence     Float        @default(0.5)
+  source         FindingSource
+  ruleId         String?
+  status         FindingStatus @default(OPEN)
+  createdAt      DateTime     @default(now())
+  resolvedAt     DateTime?
+
+  review         Review        @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  comments       ReviewComment[]
+  feedback       FindingFeedback[]
+
+  @@unique([reviewId, file, line, ruleId])
+  @@index([reviewId])
+  @@index([severity, status])
+  @@index([category])
+}
+
+enum Category {
+  BUG
+  CODE_QUALITY
+  PERFORMANCE
+  MAINTAINABILITY
+  TESTING
+  DOCUMENTATION
+  SECURITY
+  STYLE
+}
+
+enum Severity {
+  INFO
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum FindingSource {
+  STATIC_ANALYSIS
+  AST
+  METRICS
+  RULE_ENGINE
+  AI
+}
+
+enum FindingStatus {
+  OPEN
+  FIXED
+  FALSE_POSITIVE
+  WONT_FIX
+}
+
+model FindingFeedback {
+  id         String       @id @default(cuid())
+  findingId  String
+  userId     String
+  type       FeedbackType
+  comment    String?
+  createdAt  DateTime     @default(now())
+
+  finding    Finding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  user       User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([findingId, userId])
+  @@index([userId, createdAt])
+}
+
+enum FeedbackType {
+  HELPFUL
+  NOT_HELPFUL
+  FALSE_POSITIVE
+  WONT_FIX
+  FIXED
+}
+
+// ---------------------------------------------------------------------------
+// GitHub artifacts
+// ---------------------------------------------------------------------------
+
+model ReviewComment {
+  id          String   @id @default(cuid())
+  reviewId    String
+  findingId   String?
+  userId      String
+  githubId    BigInt?
+  body        String
+  kind        CommentKind
+  createdAt   DateTime @default(now())
+
+  review      Review       @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  finding     Finding?     @relation(fields: [findingId], references: [id], onDelete: SetNull)
+
+  @@unique([githubId])
+  @@index([reviewId])
+}
+
+enum CommentKind {
+  PR_SUMMARY
+  INLINE
+}
+
+
+
+
