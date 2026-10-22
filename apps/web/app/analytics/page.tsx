@@ -1,5 +1,5 @@
-﻿import { apiFetch } from "../lib/api";
-import { FindingsOverTime, SeverityPie, CategoryBars, RepoCompare, QualityTrend } from "../components/charts";
+import { apiFetch } from "../../lib/api";
+import { FindingsOverTime, SeverityPie, CategoryBars, RepoCompare, QualityTrend } from "../../components/charts";
 
 export const dynamic = "force-dynamic";
 
